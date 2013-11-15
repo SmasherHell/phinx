@@ -434,25 +434,32 @@ class MysqlAdapter extends PdoAdapter implements AdapterInterface
     }
     
     /**
+     * 
+     */
+    public function getIndexName($tableName, $columns){
+        $indexes = $this->getIndexes($tableName);
+        if (is_string($columns)) {
+            if (array_key_exists($columns, $indexes)) {
+                return $columns;
+            }
+            $columns = array($columns); // str to array
+        }
+        $columns = array_map('strtolower', $columns);
+        foreach ($indexes as $indexName => $index) {
+            $a = array_diff($columns, $index['columns']);
+            if (empty($a)) {
+                return $indexName;
+            }
+        }
+        return false;
+    }
+    
+    /**
      * {@inheritdoc}
      */
     public function hasIndex($tableName, $columns)
     {
-        if (is_string($columns)) {
-            $columns = array($columns); // str to array
-        }
-        
-        $columns = array_map('strtolower', $columns);
-        $indexes = $this->getIndexes($tableName);
-        
-        foreach ($indexes as $index) {
-            $a = array_diff($columns, $index['columns']);
-            if (empty($a)) {
-                return true;
-            }
-        }
-        
-        return false;
+        return $this->getIndexName($tableName, $columns) ? true : false;
     }
     
     /**
@@ -477,25 +484,15 @@ class MysqlAdapter extends PdoAdapter implements AdapterInterface
     public function dropIndex($tableName, $columns)
     {
         $this->startCommandTimer();
-        if (is_string($columns)) {
-            $columns = array($columns); // str to array
-        }
-        
-        $this->writeCommand('dropIndex', array($tableName, $columns));
-        $indexes = $this->getIndexes($tableName);
-        $columns = array_map('strtolower', $columns);
-        
-        foreach ($indexes as $indexName => $index) {
-            $a = array_diff($columns, $index['columns']);
-            if (empty($a)) {
-                $this->execute(
-                    sprintf('ALTER TABLE %s DROP INDEX %s',
-                        $this->quoteTableName($tableName),
-                        $this->quoteColumnName($indexName)
-                    )
-                );
-                return $this->endCommandTimer();
-            }
+        $indexName = $this->getIndexName($tableName, $columns);
+        if($indexName) {
+            $this->execute(
+                sprintf('ALTER TABLE %s DROP INDEX %s',
+                    $this->quoteTableName($tableName),
+                    $this->quoteColumnName($indexName)
+                )
+            );
+            return $this->endCommandTimer();
         }
     }
 
@@ -784,6 +781,7 @@ class MysqlAdapter extends PdoAdapter implements AdapterInterface
     {
         $sqlType = $this->getSqlType($column->getType());
         $def = '';
+        $def = '';
         $def .= strtoupper($sqlType['name']);
         if ($column->getPrecision() && $column->getScale()) {
             $def .= '(' . $column->getPrecision() . ',' . $column->getScale() . ')';
@@ -797,10 +795,6 @@ class MysqlAdapter extends PdoAdapter implements AdapterInterface
             $def .= ' DEFAULT ' . $column->getDefault();
         } else {
             $def .= is_null($column->getDefault()) ? '' : ' DEFAULT \'' . $column->getDefault() . '\'';
-        }
-
-        if ($column->getComment()) {
-            $def .= ' COMMENT ' . $this->getConnection()->quote($column->getComment());
         }
 
         if ($column->getUpdate()) {
@@ -820,10 +814,14 @@ class MysqlAdapter extends PdoAdapter implements AdapterInterface
     {
         $def = '';
         if ($index->getType() == Index::UNIQUE) {
-            $def .= ' UNIQUE KEY (`' . implode('`,`', $index->getColumns()) . '`)';
-        } else {
-            $def .= ' KEY (`' . implode('`,`', $index->getColumns()) . '`)';
+            $def .= ' UNIQUE';
+        } 
+        $def .= ' KEY';
+        $name = $index->getName();
+        if (!empty($name)) {
+            $def .= ' `' . $name . '`';
         }
+        $def .= ' (`' . implode('`,`', $index->getColumns()) . '`)';
         return $def;
     }
 
